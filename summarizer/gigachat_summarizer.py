@@ -1,5 +1,6 @@
 import os
 import json
+from langdetect import detect
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, MessagesRole
 
@@ -23,6 +24,8 @@ def summarize_text(json_input):
         text = data['text']
         if not isinstance(text, str) or not text.strip():
             return {"error": "'text' field must contain non-empty string"}
+
+        lang = detect(text)
         
         giga = GigaChat(
             credentials=auth_key,
@@ -30,14 +33,20 @@ def summarize_text(json_input):
             verify_ssl_certs=False
         )
         
-        # Очень жёсткий промпт с множественными ограничениями
-        prompt = f"""Сократи текст до МАКСИМУМ {MAX_LENGTH} символов. НЕ ПРЕВЫШАТЬ ЛИМИТ НИ В КОЕМ СЛУЧАЕ!
 
-Требования:
-- Строго не более {MAX_LENGTH} символов
-- Сохрани главную мысль
-- Пиши кратко и по делу
-- Заверши мысль полностью
+        prompt = f"""Сократи следующий текст до {MAX_LENGTH} символов. Лимит НЕ ДОЛЖЕН БЫТЬ ПРЕВЫШЕН.
+
+Правила:
+- Не добавляй ничего от себя. Никаких правок, выдумок, оценок, исправлений или дополнительных сведений.
+- Никаких приветствий, обращений, эмодзи, вводных слов и эмоциональных фраз.
+- Удали всё вроде: "вкратце", "расскажем", "итог", "подытожим", "давайте обсудим", "начнём с", "интересная область".
+- HTML-теги — проигнорируй.
+- Нецензурную лексику — опусти без замены.
+- Если текст бессмысленен, состоит из мусора или неразборчив — верни строго: «Пользователь молчит.»
+- Если текст содержит ложь, не исправляй — сократи как есть.
+- Заверши мысль или обрежь по последнему завершённому предложению.
+- Ответ должен быть строго на том же языке, что и входной текст: {lang.upper()}.
+- Результат — только суть. Одним блоком. Без добавок, пояснений, вступлений, постскриптумов и комментариев.
 
 Текст: {text}"""
         
@@ -46,29 +55,23 @@ def summarize_text(json_input):
         
         # Двойная проверка и принудительная обрезка
         if len(summary) > MAX_LENGTH:
-            # Сначала ищем завершённые предложения
             truncated = summary[:MAX_LENGTH]
             
-            # Ищем последнюю точку, восклицательный или вопросительный знак
             for punct in ['.', '!', '?']:
                 last_punct = truncated.rfind(punct)
-                if last_punct > MAX_LENGTH * 0.6:  # Если знак в последних 40%
+                if last_punct > MAX_LENGTH * 0.6:
                     summary = truncated[:last_punct + 1]
                     break
             else:
-                # Ищем последнее полное слово
                 last_space = truncated.rfind(' ')
-                if last_space > MAX_LENGTH * 0.5:  # Если пробел в последних 50%
+                if last_space > MAX_LENGTH * 0.5:
                     summary = truncated[:last_space] + '.'
                 else:
-                    # Крайний случай - обрезаем и добавляем многоточие
                     summary = truncated[:MAX_LENGTH-3] + '...'
         
-        # Финальная проверка - если всё ещё превышает, обрезаем жёстко
         if len(summary) > MAX_LENGTH:
             summary = summary[:MAX_LENGTH-3] + '...'
         
-        # Исправляем запятую в конце на точку
         if summary.endswith(','):
             summary = summary[:-1] + '.'
         
